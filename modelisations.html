@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modélisations des étudiants</title>
+    <link rel="stylesheet" href="css/travaux.css" >
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+<H1 for="pet-select">Liste des étudiants ACEHN</H1>
+<h4 id='promotion' class="rouge">Promotion 2023-2024</h4>
+
+<ul id="listeEtu">
+</ul>    
+<h2>Travaux de <span class="rouge" id="etuNom" ></span></h2>    
+<a id="repositoryLink" href="" target="_blanck">Lien vers le repository</a>    
+<div id="dimensions"></div>
+
+</body>
+<script>
+
+    let urlProjets = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxYt7Ryf3U-TpOQP45b5FpdfKW6QG8oM40hkXa8y2kYl3PAawVGl21zjA6lZESIVHDPiOJYmxKHY1D/pub?gid=1607080238&single=true&output=csv",
+        urlEtus = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQJRPQoU4941IWZd_0N_Mivoqa4bti82UaCdmGmIDVuCaEz6a-wWONdpMok1JNk73YBAKTMPgz6iZnU/pub?gid=235276481&single=true&output=csv",
+        projets, etudiants = [], url= new URL(document.location),
+        params = url.searchParams, etus,
+        numEtu = params.get('numEtu'),
+        dimensions = ['physiques','acteurs','concepts'],svgGlobal; 
+    d3.csv(urlEtus).then(rs=>{
+        etus = rs;
+        d3.csv(urlProjets).then(rs=>{
+            projets = rs;
+            console.log(projets);
+
+            //création de la liste des étudiants
+            projets.forEach(p => {
+                for (let index = 1; index <= 3; index++) {
+                    if(p['N° étudiant '+index]){
+                        let etuOri = etus.filter(e=>e['N° étudiant']==p['N° étudiant '+index])[0];
+                        etudiants.push({'id':p['N° étudiant '+index],'nom':p['Nom du collaborateur '+index]
+                            ,'github':etuOri['Votre compte GitHub']
+                            ,'p':p});
+                    }            
+                }
+            });
+            d3.select('#listeEtu')
+                .selectAll("li").data(etudiants).enter().append('li')
+                .text(d=>d.id).text(d=>d.nom)
+                .on('click',voirTravauxEtudiant);
+
+            if(numEtu){
+                let e = etudiants.filter(p=>p.id==numEtu)
+                if(e.length)voirTravaux(e[0]);
+            }
+        })
+    })
+
+    function voirTravauxEtudiant(e,d){
+        voirTravaux(d);
+    }
+    function voirTravaux(etu){
+        console.log('étudiant',etu);
+        d3.select('#dimensions').selectAll('svg').remove();
+
+        d3.select('#etuNom').html(etu.nom+' : '+etu.id);
+        let urlRepo = etu.p['Adresse du repository github'], 
+            urlPages = etu.p.urlPages,
+            divDim = d3.select('#dimensions');
+            //récupère les fichiers
+            urls = [];
+            svgGlobal=divDim.append('svg').attr('width',800).attr('height',800).attr('viewBox',"0 0 1000 2000");
+            dimensions.forEach(d=>urls.push(d3.xml(urlPages+"/modelisations/"+etu.id+'-'+d+'.svg')))
+            urls.push(d3.csv(urlPages+"/modelisations/"+etu.id+'-rapports.csv'));
+        d3.select('#repositoryLink').attr('href',urlRepo);
+
+        Promise.all(urls)
+        .then((values) => {
+            //création du svg Global            
+            dimensions.forEach((d,i)=>{
+                //d3.select('#dim'+i)
+                svgGlobal.node().append(values[i].documentElement);
+            })
+            svgGlobal.selectAll('svg').attr('y',(d,i)=>{
+                    return (600*i);
+                }).attr('id',(d,i)=>'svgDim'+i).attr('width',800).attr('height',600);
+            //création des liens
+            values[3].forEach(r=>{
+                createRapport(r);
+            });
+            console.log(values);
+        })
+        .catch((reason) => {
+            console.log(reason);
+        });
+    }
+    function createRapport(r){
+        //récupère les graphiques
+        let bb, s, rapports = [];
+        dimensions.forEach((d,i)=>{
+            s = d3.select('#svgDim'+i).select('#'+r[d]);
+            if(s.size()){
+                bb = s.node().getBoundingClientRect();
+                rapports.push({'s':s,'bb':bb});
+            }else{
+                console.log(d+' : '+r[d]+' pas trouvé');
+            } 
+        })
+        svgGlobal.append("path")
+                .style("stroke", r.couleur)//affiche la couleur de la complexité
+                //non car trop gros.style("stroke-width", d => d.nb)//la largeur du trait = nombre de rapport
+                .style("stroke-width", r.poids)
+                .style("stroke-opacity",1)
+                .style("fill", "none")
+                .attr("d", draw(rapports));        
+    }
+
+    function draw(rapports) {
+        let posis =[];
+        rapports.forEach(r=>{
+            posis.push([r.bb.x, r.bb.y]);
+        })
+        return d3.line()(posis);           
+    }
+
+    function getPosition(dim,niv,i){
+        let g = d3.select("#g_"+idsDim[dim]+niv),
+            //récupère la position de la dimension au niveau
+            bb = g.size() ? g.node().getBoundingClientRect() : false,
+            posi;
+        if(!bb){
+            console.log('ERROR getPosition : '+dim+' '+niv);
+            return [0,0];
+        }
+        //console.log('getPosition : '+dim+' '+niv,bb);                        
+        switch (dim) {
+            case 'Physique':
+                posi = [bb.x+bb.width/2,bb.y+bb.height];                    
+                break;            
+            case 'Actant':
+                posi = [bb.x+bb.width/2,bb.y+bb.height/2];                    
+                break;            
+            case 'Concept':
+                posi = [bb.x+bb.width/2,bb.y];                    
+                break;            
+        }
+        return posi;
+    }    
+
+</script>
+</html>
